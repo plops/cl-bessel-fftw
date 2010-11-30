@@ -38,6 +38,8 @@
 ;; the position (i,j,k) of a 5x12x27 array would be accessed with
 ;; array[k+27*(j+12*i)]
 
+;; this is how multidimensional arrays are stored in lisp
+
 (define-alien-routine fftwf_plan_dft_r2c
     plan
   (rank int)
@@ -179,47 +181,48 @@
 
 (defconstant +pi+ (coerce pi 'single-float))
 
-#+nil
+
 (let* ((z 128)
        (w 128)
+       (wp2 (+ (floor w 2) 1))
+       (wp (* 2 wp2))
        (h 128)
-       (vol (make-array (list (* 2 (+ (floor z 2) 1))
-			      h w)
+       (vol (make-array (list z
+			      h 
+			      wp)
 			 :element-type 'single-float)))
   (sb-sys:with-pinned-objects (vol)
-    (let ((plan (time (plan vol))))
-      (dotimes (i z)
-	(let ((a (make-array (list h w)
-			     :element-type 'single-float
-			     :displaced-to vol
-			     :displaced-index-offset (* w h i)))
-	      (z (* 32s0 (exp (complex 0 (* 4s0 2s0 +pi+ i (/ z)))))))
- 	  (draw-disk a 12s0 (realpart z) (imagpart z))))
+    (dotimes (i z)
+      (let ((a (make-array (list h wp)
+			   :element-type 'single-float
+			   :displaced-to vol
+			   :displaced-index-offset (* wp  h i)))
+	    (z (* 32s0 (exp (complex 0 (* 2s0 +pi+ i (/ z)))))))
+	(draw-disk a 3.4s0 (realpart z) (imagpart z))))
 
-      (time (ft plan vol))
+    (time (ft (plan (list z h w) vol) vol))
 
-      (dotimes (i (floor z 2))
-	(let ((a (make-array (list h	(* 2 w))
-			     :element-type 'single-float
-			     :displaced-to vol
-			     :displaced-index-offset (* 2 w h i)))
-	      (mag (make-array (list h w)
-			       :element-type 'single-float)))
-	  (format t "~a~%" (list 'size (array-total-size mag)))
-	  (dotimes (j h) 
-	    (dotimes (i w)
-	      (setf (aref mag j i) (abs (complex (aref a j i)
-						 (aref a j (1+ (* 2 i))))))))
-	  (normalize mag)  
-	  (write-pgm (format nil "/dev/shm/o~3,'0d.pgm" i)
-		     (convert mag)))))))
+    (dotimes (i z)
+      (let ((a (make-array (list h wp)
+			   :element-type 'single-float
+			   :displaced-to vol
+			   :displaced-index-offset (* wp h i)))
+	    (mag (make-array (list h wp2)
+			     :element-type 'single-float)))
+	(dotimes (j h) 
+	  (dotimes (i wp2)
+	    (setf (aref mag j i) (abs (complex (aref a j (* 2 i))
+					       (aref a j (1+ (* 2 i))))))))
+	(normalize mag)  
+	(write-pgm (format nil "/dev/shm/o~3,'0d.pgm" i)
+		   (convert mag))))))
 
-
-(let* ((w 128)
-       (h 242)
+#+nil
+(let* ((w 134)
+       (h 129)
        (a (make-array (list h (* 2 (1+ (floor w 2))))
 		     :element-type 'single-float)))
-  (draw-disk a 4.3s0 0s0 0s0)
+  (draw-disk a 14.3s0 0s0 0s0)
   (ft (plan (list h w) a) a)
   (let ((b (make-array (list h
 			     (1+ (floor w 2))
@@ -228,7 +231,7 @@
     (destructuring-bind (h w) (array-dimensions b)
       (dotimes (j h)
 	(dotimes (i w)
-	  (setf (aref b j i) (abs (complex (aref a j (* 2 i))
-				       (aref a j (1+ (* 2 i)))))))))
+	  (setf (aref b j i) (log (abs (complex (aref a j (* 2 i))
+					    (aref a j (1+ (* 2 i))))))))))
     (normalize b)
     (write-pgm "/dev/shm/o.pgm" (convert b))))
