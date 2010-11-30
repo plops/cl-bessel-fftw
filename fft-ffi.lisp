@@ -69,10 +69,9 @@
  (plan-with-nthreads 2))
 
 
-(defun plan (a)
+(defun plan (dims a)
   (declare ((simple-array single-float *) a))
-  (let* ((dims (array-dimensions a))
-	 (rank (array-rank a))
+  (let* ((rank (array-rank a))
 	 (dims-a (make-array rank :element-type '(signed-byte 32)
 			     :initial-contents dims))
 	 (a-sap (sb-sys:vector-sap
@@ -181,13 +180,13 @@
 (defconstant +pi+ (coerce pi 'single-float))
 
 #+nil
-(let* ((z 64)
-       (w 230)
+(let* ((z 128)
+       (w 128)
        (h 128)
        (vol (make-array (list (* 2 (+ (floor z 2) 1))
 			      h w)
 			 :element-type 'single-float)))
-   (sb-sys:with-pinned-objects (vol)
+  (sb-sys:with-pinned-objects (vol)
     (let ((plan (time (plan vol))))
       (dotimes (i z)
 	(let ((a (make-array (list h w)
@@ -200,32 +199,36 @@
       (time (ft plan vol))
 
       (dotimes (i (floor z 2))
-	(let ((a (make-array (list (* 2 h) w)
+	(let ((a (make-array (list h	(* 2 w))
 			     :element-type 'single-float
 			     :displaced-to vol
 			     :displaced-index-offset (* 2 w h i)))
 	      (mag (make-array (list h w)
 			       :element-type 'single-float)))
+	  (format t "~a~%" (list 'size (array-total-size mag)))
 	  (dotimes (j h) 
 	    (dotimes (i w)
-	      (setf (aref mag j i) (abs (complex (aref a (* 2 j) i)
-						 (aref a (1+ (* 2 j) i)))))))
+	      (setf (aref mag j i) (abs (complex (aref a j i)
+						 (aref a j (1+ (* 2 i))))))))
 	  (normalize mag)  
 	  (write-pgm (format nil "/dev/shm/o~3,'0d.pgm" i)
 		     (convert mag)))))))
 
-(let* ((a (make-array 2
-		      :element-type 'single-float))
-       (b (make-array 2
-		    :element-type 'single-float
-		    :displaced-to a))
-       (bs (sb-sys:int-sap (logandc2 (sb-kernel:get-lisp-obj-address b)
-				     sb-vm:lowtag-mask))))
-  (sb-sys:sap-ref-64 bs 
-		     ;sb-vm:n-word-bytes
-		     0
-		     ))
 
-sb-vm:complex-array-widetag
-sb-vm:simple-array-complex-single-float-widetag
-sb-vm:simple-array-single-float-widetag
+(let* ((w 128)
+       (h 242)
+       (a (make-array (list h (* 2 (1+ (floor w 2))))
+		     :element-type 'single-float)))
+  (draw-disk a 4.3s0 0s0 0s0)
+  (ft (plan (list h w) a) a)
+  (let ((b (make-array (list h
+			     (1+ (floor w 2))
+			     )
+		       :element-type 'single-float)))
+    (destructuring-bind (h w) (array-dimensions b)
+      (dotimes (j h)
+	(dotimes (i w)
+	  (setf (aref b j i) (abs (complex (aref a j (* 2 i))
+				       (aref a j (1+ (* 2 i)))))))))
+    (normalize b)
+    (write-pgm "/dev/shm/o.pgm" (convert b))))
