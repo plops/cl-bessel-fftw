@@ -3,8 +3,6 @@
 (in-package :fft)
 (declaim (optimize (speed 2) (debug 3) (safety 3)))
 
-
-
 (defconstant +forward+ 1)
 (defconstant +backward+ -1)
 (defconstant +measure+ 0)
@@ -76,7 +74,7 @@
   (let* ((dims (array-dimensions a))
 	 (rank (array-rank a))
 	 (dims-a (make-array rank :element-type '(signed-byte 32)
-			     :initial-contents (reverse dims)))
+			     :initial-contents dims))
 	 (a-sap (sb-sys:vector-sap
 		 (sb-ext:array-storage-vector a))))
     (sb-sys:with-pinned-objects (dims-a a)
@@ -99,8 +97,6 @@
   (time (ft plan a))
   (aref a 0 0 0 0))
 
-#+nil
-(sb-ext:gc :full t)
 
 ;; 1024x1024x512 transform takes 21s
 ;; 2048x2048x128 13s on one processor, 8s on two
@@ -132,23 +128,28 @@
 
 (defun draw-disk (img radius y x)
   (declare (single-float radius y x)
-	   ((simple-array single-float *) img)
-	   (values (simple-array single-float *) &optional))
+	   ((array single-float *) img)
+	   (values (array single-float *) &optional))
   (destructuring-bind (h w) (array-dimensions img)
     (declare ((integer 0 65535) w h))
-    (let ((rr (* radius radius)))
+    (let ((rr (* radius radius))
+	  (w2 (* .5 w))
+	  (h2 (* .5 h)))
      (dotimes (j h)
        (dotimes (i w)
-	 (let* ((x (- i x))
-		(y (- j y))
+	 (let* ((x (- i x w2))
+		(y (- j y h2))
 		(r2 (+ (* x x) (* y y))))
-	   (when (< r2 rr)
-	     (setf (aref img j i) 1s0)))))))
+	   (setf (aref img j i)
+		 (if (< r2 rr)
+		     1s0
+		     0s0)))))))
   img)
 
 (defun convert (img)
-  (declare ((simple-array single-float *) img))
-  (let* ((img1 (sb-ext:array-storage-vector img))
+  (declare ((array single-float *) img))
+  (let* ((img1 (make-array (array-total-size img) :element-type 'single-float
+			   :displaced-to img))
 	 (n (length img1))
 	 (out (make-array (array-dimensions img)
 			  :element-type '(unsigned-byte 8)))
@@ -158,8 +159,9 @@
     out))
 
 (defun normalize (img)
-  (declare ((simple-array single-float *) img))
-  (let* ((img1 (sb-ext:array-storage-vector img))
+  (declare ((array single-float *) img))
+  (let* ((img1 (make-array (array-total-size img) :element-type 'single-float
+			   :displaced-to img))
 	 (mi (reduce #'min img1))
 	 (ma (reduce #'max img1))
 	 (s (/ 255s0 (- ma mi)))
@@ -176,10 +178,54 @@
 		      :initial-contents al)))
   (normalize a))
 
-(let ((a (make-array (list 128 128)
-		     :element-type 'single-float)))
-  (draw-disk a 12s0 21.3s0 18s0)
-  (normalize a)
-  
-  (write-pgm "/dev/shm/o.pgm" (convert a))
- )
+(defconstant +pi+ (coerce pi 'single-float))
+
+#+nil
+(let* ((z 64)
+       (w 230)
+       (h 128)
+       (vol (make-array (list (* 2 (+ (floor z 2) 1))
+			      h w)
+			 :element-type 'single-float)))
+   (sb-sys:with-pinned-objects (vol)
+    (let ((plan (time (plan vol))))
+      (dotimes (i z)
+	(let ((a (make-array (list h w)
+			     :element-type 'single-float
+			     :displaced-to vol
+			     :displaced-index-offset (* w h i)))
+	      (z (* 32s0 (exp (complex 0 (* 4s0 2s0 +pi+ i (/ z)))))))
+ 	  (draw-disk a 12s0 (realpart z) (imagpart z))))
+
+      (time (ft plan vol))
+
+      (dotimes (i (floor z 2))
+	(let ((a (make-array (list (* 2 h) w)
+			     :element-type 'single-float
+			     :displaced-to vol
+			     :displaced-index-offset (* 2 w h i)))
+	      (mag (make-array (list h w)
+			       :element-type 'single-float)))
+	  (dotimes (j h) 
+	    (dotimes (i w)
+	      (setf (aref mag j i) (abs (complex (aref a (* 2 j) i)
+						 (aref a (1+ (* 2 j) i)))))))
+	  (normalize mag)  
+	  (write-pgm (format nil "/dev/shm/o~3,'0d.pgm" i)
+		     (convert mag)))))))
+
+(let* ((a (make-array 2
+		      :element-type 'single-float))
+       (b (make-array 2
+		    :element-type 'single-float
+		    :displaced-to a))
+       (bs (sb-sys:int-sap (logandc2 (sb-kernel:get-lisp-obj-address b)
+				     sb-vm:lowtag-mask))))
+  (sb-sys:sap-ref-64 bs 
+		     ;sb-vm:n-word-bytes
+		     0
+		     ))
+
+sb-vm:complex-array-widetag
+sb-vm:simple-array-complex-single-float-widetag
+sb-vm:simple-array-single-float-widetag
