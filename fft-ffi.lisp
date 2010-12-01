@@ -142,10 +142,19 @@
 		(y (- j y h2))
 		(r2 (+ (* x x) (* y y))))
 	   (setf (aref img j i)
-		 (if (< r2 rr)
-		     1s0
+		 (if (< r2 (* 2 rr))
+		     (* 255s0 (exp (* .01s0 (- r2))))
 		     0s0)))))))
   img)
+
+(defun clamp (x)
+  (declare (single-float x)
+	   (values fixnum &optional))
+  (cond ((< x 0s0) 0)
+	((< 255s0 x) 255)
+	(t (multiple-value-bind (a b) (floor x)
+	     (declare (ignore b))
+	     a))))
 
 (defun convert (img)
   (declare ((array single-float *) img))
@@ -156,16 +165,19 @@
 			  :element-type '(unsigned-byte 8)))
 	 (out1 (sb-ext:array-storage-vector out)))
     (dotimes (i n)
-      (setf (aref out1 i) (floor (aref img1 i))))
+      (setf (aref out1 i) (clamp (aref img1 i))))
     out))
 
-(defun normalize (img)
-  (declare ((array single-float *) img))
-  (let* ((img1 (make-array (array-total-size img) :element-type 'single-float
+(defun normalize (img &optional (value 255s0))
+  (declare ((array single-float *) img)
+	   (single-float value)
+	   (values (array single-float *) &optional))
+  (let* ((img1 (make-array (array-total-size img)
+			   :element-type 'single-float
 			   :displaced-to img))
 	 (mi (reduce #'min img1))
 	 (ma (reduce #'max img1))
-	 (s (/ 255s0 (- ma mi)))
+	 (s (/ value (- ma mi)))
 	 (n (length img1)))
     (dotimes (i n)
       (setf (aref img1 i)
@@ -181,15 +193,27 @@
 
 (defconstant +pi+ (coerce pi 'single-float))
 
+(defun complexify (dims a)
+  (declare ((array single-float *) a))
+  (destructuring-bind (z y x) dims
+    (let* ((xp (array-dimension a 2))
+	   (xp2 (floor xp 2))
+	   (o (make-array (list z y xp2) 
+			  :element-type '(complex single-float))))
+      (dotimes (k z)
+	(dotimes (j y) 
+	  (dotimes (i xp2)
+	    (setf (aref o k j i) (complex (aref a k j (* 2 i))
+					  (aref a k j (1+ (* 2 i))))))))
+      o)))
 
+#+nil
 (let* ((z 128)
        (w 128)
        (wp2 (+ (floor w 2) 1))
        (wp (* 2 wp2))
        (h 128)
-       (vol (make-array (list z
-			      h 
-			      wp)
+       (vol (make-array (list z h wp)
 			 :element-type 'single-float)))
   (sb-sys:with-pinned-objects (vol)
     (dotimes (i z)
@@ -197,25 +221,24 @@
 			   :element-type 'single-float
 			   :displaced-to vol
 			   :displaced-index-offset (* wp  h i)))
-	    (z (* 32s0 (exp (complex 0 (* 2s0 +pi+ i (/ z)))))))
-	(draw-disk a 3.4s0 (realpart z) (imagpart z))))
+	    (z (* 32s0 (exp (complex 0 (* 3s0 +pi+ i (/ 2s0 z)))))))
+	(draw-disk a 12.4s0 (realpart z) (imagpart z))))
 
-    (time (ft (plan (list z h w) vol) vol))
-
-    (dotimes (i z)
-      (let ((a (make-array (list h wp)
-			   :element-type 'single-float
-			   :displaced-to vol
-			   :displaced-index-offset (* wp h i)))
-	    (mag (make-array (list h wp2)
-			     :element-type 'single-float)))
-	(dotimes (j h) 
-	  (dotimes (i wp2)
-	    (setf (aref mag j i) (abs (complex (aref a j (* 2 i))
-					       (aref a j (1+ (* 2 i))))))))
-	(normalize mag)  
-	(write-pgm (format nil "/dev/shm/o~3,'0d.pgm" i)
-		   (convert mag))))))
+    (ft (plan (list z h w) vol) vol)
+    
+    (let* ((com (complexify (list z h w) vol))
+	   (com1 (sb-ext:array-storage-vector com))
+	   (coma (make-array (list z h wp2) :element-type 'single-float))
+	   (coma1 (sb-ext:array-storage-vector coma)))
+      (dotimes (i (* z h wp2))
+	(setf (aref coma1 i) (abs (aref com1 i))))
+      (normalize coma 24000s0)
+      (dotimes (k z)
+	(let ((slice (make-array (list h wp2) :element-type 'single-float
+				 :displaced-to coma
+				 :displaced-index-offset (* k h wp2))))
+	  (write-pgm (format nil "/dev/shm/o~3,'0d.pgm" k)
+		     (convert slice)))))))
 
 #+nil
 (let* ((w 134)
