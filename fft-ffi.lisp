@@ -207,6 +207,27 @@
 					  (aref a k j (1+ (* 2 i))))))))
       o)))
 
+(defun xz-slice (a y)
+  (declare ((array * *) a)
+	   (fixnum y))
+  (destructuring-bind (z yy x) (array-dimensions a)
+    (declare (ignore yy))
+   (let ((slice (make-array (list z x)
+			    :element-type (array-element-type a))))
+     (dotimes (k z)
+       (dotimes (i x)
+	 (setf (aref slice k i) 
+	       (aref a k y i))))
+     slice)))
+
+(defun xy-slice (a z)
+  (destructuring-bind (zz y x) (array-dimensions a)
+    (declare (ignore zz))
+    (make-array (list y x) 
+		:element-type (array-element-type a)
+		:displaced-to a
+		:displaced-index-offset (* z y x))))
+
 #+nil
 (let* ((z 128)
        (w 128)
@@ -221,7 +242,7 @@
 			   :element-type 'single-float
 			   :displaced-to vol
 			   :displaced-index-offset (* wp  h i)))
-	    (z (* 32s0 (exp (complex 0 (* 3s0 +pi+ i (/ 2s0 z)))))))
+	    (z (* 32s0 (exp (complex 0 (* +pi+ i (/ 2s0 z)))))))
 	(draw-disk a 12.4s0 (realpart z) (imagpart z))))
 
     (ft (plan (list z h w) vol) vol)
@@ -231,14 +252,11 @@
 	   (coma (make-array (list z h wp2) :element-type 'single-float))
 	   (coma1 (sb-ext:array-storage-vector coma)))
       (dotimes (i (* z h wp2))
-	(setf (aref coma1 i) (abs (aref com1 i))))
-      (normalize coma 24000s0)
-      (dotimes (k z)
-	(let ((slice (make-array (list h wp2) :element-type 'single-float
-				 :displaced-to coma
-				 :displaced-index-offset (* k h wp2))))
-	  (write-pgm (format nil "/dev/shm/o~3,'0d.pgm" k)
-		     (convert slice)))))))
+	(setf (aref coma1 i)	(log (+ .01s0 (abs (aref com1 i))))))
+      (normalize coma 255 s0)
+      (dotimes (j 4)
+	(write-pgm (format nil "/dev/shm/o~3,'0d.pgm" j)
+		   (convert (xz-slice coma j)))))))
 
 #+nil
 (let* ((w 134)
